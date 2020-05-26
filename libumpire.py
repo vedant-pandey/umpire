@@ -11,6 +11,16 @@ argparser = argparse.ArgumentParser(description="Umpire version control manager"
 argsubparsers = argparser.add_subparsers(title="Commands", dest="command")
 argsubparsers.required = True
 
+# CLI argument parser for init command
+argsp = argsubparsers.add_parser("init", help="Initialize a new, empty repository.")
+argsp.add_argument(
+	"path", 
+	metavar="directory",
+	nargs="?", 
+	default=".", 
+	help="Where to create he repository"
+)
+
 def main(argv=sys.argv[1:]):
 	args = argparser.parse_args(argv)
 
@@ -132,3 +142,26 @@ def repo_default_config():
 	ret.set("core", "bare", "false")
 
 	return ret
+
+
+# Init command handler
+def cmd_init(args):
+	repo_create(args.path)
+
+def repo_find(path=".", required=True):
+	path = os.path.realpath(path)
+
+	if os.path.isdir(os.path.join(path, ".ump")):
+		return UmpRepo(path)
+
+	# Recurse parent if current directory is not the main git directory
+	parent = os.path.realpath(os.path.join(path, ".."))
+
+	# Base case if current directory is system root
+	if parent == path:
+		if required:
+			raise Exception("No upmire repository found")
+		else:
+			return None
+
+	return repo_find(parent, required)
