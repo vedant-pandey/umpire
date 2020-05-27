@@ -17,15 +17,15 @@ def main(argv=sys.argv[1:]):
 	if   args.command == "add"         : cmd_add(args)
 	elif args.command == "cat-file"    : cmd_cat_file(args)
 	elif args.command == "checkout"    : cmd_checkout(args)
-	elif args.command == "commit"      : cmd_commit(args)
+	# elif args.command == "commit"      : cmd_commit(args)
 	elif args.command == "hash-object" : cmd_hash_object(args)
 	elif args.command == "init"        : cmd_init(args)
 	elif args.command == "log"         : cmd_log(args)
 	elif args.command == "ls-tree"     : cmd_ls_tree(args)
-	elif args.command == "merge"       : cmd_merge(args)
-	elif args.command == "rebase"      : cmd_rebase(args)
+	# elif args.command == "merge"       : cmd_merge(args)
+	# elif args.command == "rebase"      : cmd_rebase(args)
 	elif args.command == "rev-parse"   : cmd_rev_parse(args)
-	elif args.command == "rm"          : cmd_rm(args)
+	# elif args.command == "rm"          : cmd_rm(args)
 	elif args.command == "show-ref"    : cmd_show_ref(args)
 	elif args.command == "tag"         : cmd_tag(args)
 
@@ -210,7 +210,35 @@ def object_read(repo, sha):
 
 # Placeholder function
 def object_find(repo, name, fmt=None, follow=True):
-	return name
+	sha = object_resolve(repo, name)
+
+	if not sha:
+		raise Exception("No such reference {0}.".format(name))
+
+	if len(sha) > 1:
+		raise Exception("Ambiguous reference {0}: Candidates are:\n - {1}.".format(name,  "\n - ".join(sha)))
+
+	sha = sha[0]
+
+	if not fmt:
+		return sha
+
+	while True:
+		obj = object_read(repo, sha)
+
+		if obj.fmt == fmt:
+				return sha
+
+		if not follow:
+				return None
+
+		# Follow tags
+		if obj.fmt == b'tag':
+				sha = obj.kvlm[b'object'].decode("ascii")
+		elif obj.fmt == b'commit' and fmt == b'tree':
+			sha = obj.kvlm[b'tree'].decode("ascii")
+		else:
+			return None
 
 def object_write(obj, true_write=True):
 	# Serialize data
@@ -593,3 +621,91 @@ def cmd_tags(args):
 	else:
 		refs = ref_list(repo)
 		show_ref(repo, refs["tags"], with_hash=False)
+
+def object_resolve(repo, name):
+	"""Resolve name to object hash in repo
+
+This function is aware of:
+
+	- the HEAD literal
+	- short and long hashes
+	- tags
+	- branches
+	- remote branches"""
+
+	candidates = list()
+	hashRE = re.compile(r"^[0-9A-Fa-f]{1,16}$")
+	smallHashRE = re.compile(r"^[0-9A-Fa-f]{1,16}$")
+
+	if not name.strip():
+		return None
+
+	if name == "HEAD":
+		return [ ref_resolve(repo, "HEAD") ]
+
+	if hashRE.match(name):
+		if len(name) == 40:
+			return [ name.lower() ]
+		elif len(name) >= 4:
+			name = name.lower()
+			prefix = name[0:2]
+			path = repo_dir(repo, "objects", prefix, mkdir=False)
+			if path:
+				rem = name[2:]
+				for f in os.listdir(path):
+					if f.startswith(rem):
+						candidates.append(prefix + f)
+
+	return candidates
+
+argsp = argsubparsers.add_parser("rev-parse",	help="Parse revision (or other objects )identifiers")
+
+argsp.add_argument(
+	"--ump-type",
+	metavar="type",
+	dest="type",
+	choices=["blob", "commit", "tag", "tree"],
+	default=None,
+	help="Specify the expected type"
+)
+
+argsp.add_argument("name", help="The name to parse")
+
+def cmd_rev_parse(args):
+	if args.type:
+		fmt = args.type.encode()
+
+	repo = repo_find()
+
+	print (object_find(repo, args.name, args.type, follow=True))
+
+class GitIndexEntry(object):
+	ctime = None
+	"""The last time a file's metadata changed.  This is a tuple (seconds, nanoseconds)"""
+
+	mtime = None
+	"""The last time a file's data changed.  This is a tuple (seconds, nanoseconds)"""
+
+	dev = None
+	"""The ID of device containing this file"""
+	ino = None
+	"""The file's inode number"""
+	mode_type = None
+	"""The object type, either b1000 (regular), b1010 (symlink), b1110 (gitlink). """
+	mode_perms = None
+	"""The object permissions, an integer."""
+	uid = None
+	"""User ID of owner"""
+	gid = None
+	"""Group ID of ownner (according to stat 2.  Isn'th)"""
+	size = None
+	"""Size of this object, in bytes"""
+	obj = None
+	"""The object's hash as a hex string"""
+	flag_assume_valid = None
+	flag_extended = None
+	flag_stage = None
+	flag_name_length = None
+	"""Length of the name if < 0xFFF (yes, three Fs), -1 otherwise"""
+
+	name = None
