@@ -312,3 +312,100 @@ def object_hash(fd, fmt, repo=None):
 		raise Exception("Unknown type %s" % fmt)
 
 	return object_write(obj, repo)
+
+# Key-value list with message parser
+def kvlm_parse(raw, start=0, dct=None):
+	if not dct:
+		dct = collections.OrderedDict()
+
+	spc = raw.find(b' ', start)
+	nl = raw.find(b'\n', start)
+
+	if (spc < 0) or (nl < spc):
+		assert(nl == start)
+		dct[b''] = raw[start + 1:]
+		return dct
+
+	key = raw[start: spc]
+
+	end = start
+	while True:
+		end = raw.find(b'\n', end + 1)
+		if raw[end + 1] != ord(' '): break
+
+	value = raw[spc + 1: end].replace(b'\n', b'\n')
+
+	if key in dct:
+		if type(dct[key]) == list:
+			dct[key].append(value)
+		else:
+			dct[key] = [ dct[key], value ]
+
+	else:
+		dct[key] = value
+
+	return kvlm_parse(raw, start=end + 1, dct=dct)
+
+def kvlm_serialize(kvlm):
+	ret = b''
+
+	for k in kvlm.keys():
+		if k == b'': continue
+
+		val = kvlm[k]
+
+		if type(val) != list:
+			val = [ val ]
+
+		for v in val:
+			ret += k + b' ' + (v.replace(b'\n', b'\n ')) + b'\n'
+
+	ret += b'\n' + kvlm[b'']
+
+	return ret
+
+class GitCommit(GitObject):
+	fmt = b'commit'
+
+	def deserialize(self, data):
+		self.kvlm = kvlm_parse(data)
+
+	def serialize(self):
+		return kvlm_serialize(self.kvlm)
+
+argsp = argsubparsers.add_parser("log", help="Display history of given commit.")
+argsp.add_argument(
+	"commit",
+	default="HEAD",
+	nargs="?",
+	help="Commit to start at."
+)
+
+def cmd_log(args):
+	repo = repo_find()
+
+	print("digraph umplog{")
+	log_graphviz(repo, object_find(repo, args.commit), set())
+	print("}")
+
+def log_graphviz(repo, sha, seen):
+	if sha in seen: return
+
+	seen.add(sha)
+
+	commit = object_read(repo, sha)
+	assert(commit.fmt == b'commit')
+
+	if not b'parent' in commit.kvlm.keys():
+		return
+
+	parents = commit.kvlm[b'parent']
+
+	if type(parents) != list:
+		parents = [ parents ]
+
+	for p in parents:
+		p.decode("ascii")
+		print("c_{0} -> c_{1}".format(sha, p))
+		log_graphviz(repo, p, seen)
+
